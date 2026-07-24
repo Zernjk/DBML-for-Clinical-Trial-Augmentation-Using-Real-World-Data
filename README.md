@@ -5,8 +5,8 @@ candidate pool using variational autoencoders (VAEs), reconstruction-based
 screening, and distribution-balancing weights.
 
 This repository accompanies an academic paper. It contains the core Python
-implementation, a Python/R demonstration notebook, and the R code used to
-generate the simulation data.
+implementation, a Python/R demonstration notebook, simulation-data generation
+code, and the preprocessing workflow used for the MIMIC-IV analysis.
 
 > **Research software:** The code is provided to support transparency and
 > reproducibility. It has not been packaged as a production library.
@@ -52,7 +52,9 @@ flowchart LR
 | `outlier_detection.py` | Reconstruction-loss intersection screening |
 | `mmd.py` | KMMD, neural-network KMMD, and Euclidean balancing |
 | `utils_distributions.py` | Distribution utilities used by the VAE models |
-| `data generation.Rmd` | Simulation-data generation for the scenarios used in the study |
+| `data/simulated data/data generation.Rmd` | Simulation-data generation for the scenarios used in the study |
+| `data/mimic-iv/datapreprocess.Rmd` | Construction of the MIMIC-IV treatment and candidate-control cohorts |
+| `data/mimic-iv/LICENSE.txt` | PhysioNet Credentialed Health Data License governing the MIMIC-IV data |
 
 ## Requirements
 
@@ -105,7 +107,80 @@ For GPU-enabled PyTorch, use the installation command appropriate for your
 CUDA version from the
 [official PyTorch installation guide](https://pytorch.org/get-started/locally/).
 
-## Data requirements
+## Data organization
+
+Only reproducible code and licensing information are included:
+
+```text
+data/
+|-- simulated data/
+|   `-- data generation.Rmd
+`-- mimic-iv/
+    |-- datapreprocess.Rmd
+    `-- LICENSE.txt
+```
+
+`data/simulated data/` contains the R Markdown source used to generate the
+simulation inputs. Generated simulation replicates are written to
+scenario-specific subdirectories selected inside the R Markdown file.
+
+No MIMIC-IV source data, derived patient-level data, or prepared analysis
+datasets are included in this repository.
+
+### MIMIC-IV access and redistribution
+
+MIMIC-IV and MIMIC-IV-ED are credentialed PhysioNet resources. Users must
+independently obtain access, complete the required training, and accept the
+applicable data use agreement. See the official
+[MIMIC-IV](https://physionet.org/content/mimiciv/) and
+[MIMIC-IV-ED](https://physionet.org/content/mimic-iv-ed/2.2/) pages.
+
+> **Do not publish the MIMIC data files in a public GitHub repository.**
+> `admissions.csv`, `mds_ed.rds`, `trt.rds`, and `big.rds` contain restricted
+> or derived patient-level data and remain subject to the
+> [PhysioNet Credentialed Health Data License](data/mimic-iv/LICENSE.txt).
+> The license does not permit sharing access with other users. Keep these files
+> outside version control; publish only the preprocessing code and instructions.
+
+The repository's MIT License applies to the software only. It does not replace
+or modify the terms governing MIMIC-IV or any derived data.
+
+When reporting results, cite the exact MIMIC-IV and MIMIC-IV-ED versions used.
+The PhysioNet project pages provide the corresponding citations and versioned
+DOIs.
+
+### MIMIC-IV preprocessing
+
+Run `data/mimic-iv/datapreprocess.Rmd` from its own directory after placing the
+authorized source files there. The workflow:
+
+1. reads `mds_ed.rds` and `admissions.csv`;
+2. retains one complete record per subject after joining ED-derived features
+   with admission characteristics;
+3. defines the treatment cohort as a random sample of 1,000 Medicaid records;
+4. defines the candidate-control pool as the non-Medicaid records;
+5. removes identifiers, insurance, and the `deterioration_icu_24h` outcome from
+   the model inputs; and
+6. writes the processed covariates to `trt.rds` and `big.rds`.
+
+Set an R seed immediately before `slice_sample()` if the exact sampled
+treatment cohort must be regenerated. The script produces a 1,000-record
+treatment cohort; the size of the non-Medicaid candidate pool depends on the
+authorized source-data version and preprocessing result.
+
+The MIMIC-IV inputs use these zero-based feature indices:
+
+| Modality | Indices | Variables |
+| --- | --- | --- |
+| Binary | `0, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12` | Gender, four ethnicity indicators, and six diagnosis indicators |
+| Continuous | `1, 6` | Age and median heart rate |
+| Categorical | `13: 5`, `14: 4` | Language (5 levels) and marital status (4 levels) |
+| Ordinal | None | No ordinal variables are used in this analysis |
+
+The preprocessing R Markdown file requires `readr`, `dplyr`, `ggplot2`,
+`tidyverse`, `patchwork`, and `forcats`.
+
+### General input requirements
 
 The main pipeline requires two row-oriented tables:
 
@@ -125,18 +200,20 @@ Column roles are supplied as zero-based indices in the preprocessing
 configuration. The current implementation does not impute missing values, so
 inputs should be cleaned before calling the pipeline.
 
-Patient-level or otherwise restricted source data are not included in this
-repository.
+For a public release, provide simulated data or instructions that allow
+credentialed users to reconstruct restricted real-world inputs locally.
 
 ## Quick start: Python pipeline
 
-The example below shows the main API. Replace the input paths and column
-indices with values appropriate for your data.
+The example below shows the main API for the MIMIC-IV analysis. It assumes that
+an authorized, credentialed user has run `data/mimic-iv/datapreprocess.Rmd`
+locally to create `trt.rds` and `big.rds`. These files are intentionally not
+provided by this repository.
 
 ```python
 import numpy as np
-import pandas as pd
 import torch
+import pyreadr
 
 from run_pipeline import run_full_simulation_from_data
 
@@ -148,15 +225,19 @@ if torch.cuda.is_available():
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-treatment = pd.read_csv("data/treatment.csv")
-candidate_pool = pd.read_csv("data/candidate_pool.csv")
+def read_rds(path):
+    objects = pyreadr.read_r(path)
+    return next(iter(objects.values()))
+
+treatment = read_rds("data/mimic-iv/trt.rds")
+candidate_pool = read_rds("data/mimic-iv/big.rds")
 
 config = {
     "preprocess": {
-        "binary_indices": [0, 1, 2, 3, 4],
-        "categorical_indices_with_levels": {5: 4, 6: 6},
-        "ordinal_indices": [7, 8],
-        "continuous_indices": [9],
+        "binary_indices": [0, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12],
+        "categorical_indices_with_levels": {13: 5, 14: 4},
+        "ordinal_indices": [],
+        "continuous_indices": [1, 6],
     },
     "vae": {
         "binary": {
@@ -164,17 +245,6 @@ config = {
             "epochs": 1000,
             "hidden_dim": 50,
             "n_components": 2,
-            "lr": 0.005,
-            "scheduler": "cosine",
-        },
-        "ordinal": {
-            "batch_size": 128,
-            "epochs": 1000,
-            "hidden_dim": 50,
-            "n_components": 2,
-            # One number of levels for each ordinal variable.
-            "ordinal_K": [4, 4],
-            "embedding_dim": 4,
             "lr": 0.005,
             "scheduler": "cosine",
         },
@@ -227,7 +297,7 @@ config = {
     data=treatment,
     big_data=candidate_pool,
     configs=config,
-    output_root="output",
+    output_root="output/mimic-iv",
     return_result_type="original",
     device=device,
 )
@@ -259,9 +329,11 @@ assessment.
 1. Open the notebook in Google Colab and select a GPU runtime if available.
 2. Upload or mount the repository and change the notebook's working-directory
    cell to the repository location.
-3. Place `trt.rds` and `big.rds` at the paths used in the final notebook cell,
-   or edit those paths.
-4. Review the feature-index and ordinal-level configuration.
+3. For the MIMIC-IV analysis, first generate the restricted inputs locally
+   with `data/mimic-iv/datapreprocess.Rmd`, then change the notebook paths to
+   `data/mimic-iv/trt.rds` and `data/mimic-iv/big.rds`.
+4. Replace the notebook's simulation feature configuration with the MIMIC-IV
+   indices shown in the Python quick start above.
 5. Run the cells in order.
 
 The notebook installs or loads these R packages:
@@ -275,10 +347,10 @@ complete experiment.
 
 ## Reproducing the simulated data
 
-Open `data generation.Rmd` in RStudio or render it with:
+Open `data/simulated data/data generation.Rmd` in RStudio or render it with:
 
 ```r
-rmarkdown::render("data generation.Rmd")
+rmarkdown::render("data/simulated data/data generation.Rmd")
 ```
 
 The R Markdown file defines 10- and 20-covariate scenarios containing binary,
@@ -295,17 +367,17 @@ Required R packages for data generation are `tidyverse`, `fastDummies`,
 
 ## Outputs
 
-By default, artifacts are written beneath the selected `output_root`:
+Artifacts are written beneath the selected `output_root`:
 
 ```text
-output/
-├── vae/
-│   ├── binary/
-│   ├── ordinal/
-│   ├── cont/
-│   ├── latent_vae/
-│   └── intersection/
-└── kmmd/
+<output_root>/
+|-- vae/
+|   |-- binary/
+|   |-- ordinal/
+|   |-- cont/
+|   |-- latent_vae/
+|   `-- intersection/
+`-- kmmd/
 ```
 
 Depending on the save flags, these directories contain trained model
@@ -353,4 +425,6 @@ identifier used in the analysis.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+The source code is licensed under the [MIT License](LICENSE). MIMIC-IV source
+and derived data are governed separately by the
+[PhysioNet Credentialed Health Data License](data/mimic-iv/LICENSE.txt).
