@@ -55,6 +55,7 @@ flowchart LR
 | `data/simulated data/data generation.Rmd` | Simulation-data generation for the scenarios used in the study |
 | `data/mimic-iv/datapreprocess.Rmd` | Construction of the MIMIC-IV treatment and candidate-control cohorts |
 | `data/mimic-iv/LICENSE.txt` | PhysioNet Credentialed Health Data License governing the MIMIC-IV data |
+| `data/pacer/data preprocess.Rmd` | Preprocessing of PACER-based synthetic clinical-trial and real-world-data inputs |
 
 ## Requirements
 
@@ -115,17 +116,19 @@ Only reproducible code and licensing information are included:
 data/
 |-- simulated data/
 |   `-- data generation.Rmd
-`-- mimic-iv/
-    |-- datapreprocess.Rmd
-    `-- LICENSE.txt
+|-- mimic-iv/
+|   |-- datapreprocess.Rmd
+|   `-- LICENSE.txt
+`-- pacer/
+    `-- data preprocess.Rmd
 ```
 
 `data/simulated data/` contains the R Markdown source used to generate the
 simulation inputs. Generated simulation replicates are written to
 scenario-specific subdirectories selected inside the R Markdown file.
 
-No MIMIC-IV source data, derived patient-level data, or prepared analysis
-datasets are included in this repository.
+No MIMIC-IV source data, PACER patient-level data, derived patient-level data,
+or prepared analysis datasets are included in this repository.
 
 ### MIMIC-IV access and redistribution
 
@@ -186,6 +189,56 @@ The MIMIC-IV inputs use these zero-based feature indices:
 
 The preprocessing R Markdown file requires `readr`, `dplyr`, `ggplot2`,
 `tidyverse`, `patchwork`, and `forcats`.
+
+### PACER-based synthetic data
+
+The PACER example is based on the Placental Abruption and Cardiovascular Event
+Risk cohort described by Ananth et al. The underlying PACER patient-level data
+are not publicly available because of data-privacy restrictions and are not
+included in this repository.
+
+The synthetic clinical-trial and real-world-data inputs used by this workflow
+follow the external-control-arm application described by Cabrera et al. and
+were generated outside this repository using the
+[DNAMR R package](https://github.com/xaviercabrera/DNAMR). DNAMR is distributed
+separately under the GPL-3.0 License; no DNAMR source code is vendored here.
+
+Related publications and software:
+
+- Ananth, C. V., Lee, R., Valeri, L., Ross, Z., Graham, H. L., Khan, S. P.,
+  Cabrera, J., Rosen, T., & Kostis, W. J. (2024). *Placental Abruption and
+  Cardiovascular Event Risk (PACER): Design, data linkage, and preliminary
+  findings*. **Paediatric and Perinatal Epidemiology, 38**(3), 271-286.
+  [https://doi.org/10.1111/ppe.13039](https://doi.org/10.1111/ppe.13039);
+  [PubMed PMID: 38273776](https://pubmed.ncbi.nlm.nih.gov/38273776/)
+- Cabrera, J., Alemayehu, B., Alemayehu, D., & Weigle, S. (2026).
+  *Advancing Evidence Generation in Biomedical Research Using Natural Hermite
+  and Propensity Score Indices: Applications to External Control Arms*.
+  arXiv:2602.24127.
+  [https://doi.org/10.48550/arXiv.2602.24127](https://doi.org/10.48550/arXiv.2602.24127)
+- Cabrera, J. [DNAMR](https://github.com/xaviercabrera/DNAMR), R package
+  repository.
+
+Run `data/pacer/data preprocess.Rmd` from its own directory after generating or
+otherwise obtaining the authorized synthetic inputs:
+
+- `CTfinal.RDS`: synthetic clinical-trial cohort;
+- `RWDfinal.RDS`: synthetic real-world candidate pool.
+
+The preprocessing workflow:
+
+1. renames `MONTH` to `YEAR`;
+2. converts `REGION`, `RACE`, `HOSPBEDR`, and `HOSPOWN` to factors;
+3. combines `PE_MILD` and `PE_SEVERE` into a binary `PE` variable;
+4. numerically encodes the factor variables;
+5. restricts the real-world candidate pool to `YEAR >= 26` and shifts the year
+   scale by 25 in both cohorts; and
+6. writes `trt.rds` and `big.rds` beneath
+   `data for vml/filter year/`.
+
+Create the output directory before rendering the file. The PACER preprocessing
+script requires R and `dplyr`. The generated synthetic inputs and processed
+outputs are intentionally not included in this repository.
 
 ### General input requirements
 
@@ -404,6 +457,8 @@ To reuse saved artifacts, call the pipeline with `train_vae=False` and/or
   and commit identifier for each reported experiment.
 - Do not commit confidential or patient-level data, model artifacts derived
   from restricted data, or other protected outputs.
+- Record the DNAMR version or commit used to generate PACER-based synthetic
+  inputs.
 
 ## Citation
 
@@ -435,3 +490,5 @@ identifier used in the analysis.
 The source code is licensed under the [MIT License](LICENSE). MIMIC-IV source
 and derived data are governed separately by the
 [PhysioNet Credentialed Health Data License](data/mimic-iv/LICENSE.txt).
+[DNAMR](https://github.com/xaviercabrera/DNAMR) is a separate dependency
+distributed under the GPL-3.0 License.
