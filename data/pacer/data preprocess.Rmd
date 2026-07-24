@@ -1,0 +1,84 @@
+---
+title: "data preprocess for pacer"
+output: html_document
+date: "2025-09-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+```
+
+
+# Get data
+
+```{r}
+trt = as.data.frame(readRDS('CTfinal.RDS'))
+big = as.data.frame(readRDS('RWDfinal.RDS'))
+
+trt = trt %>% rename(YEAR=MONTH)
+trt$REGION = as.factor(trt$REGION)
+trt$RACE = as.factor(trt$RACE)
+trt$HOSPBEDR = as.factor(trt$HOSPBEDR)
+trt$HOSPOWN = as.factor(trt$HOSPOWN)
+
+big = big %>% rename(YEAR=MONTH)
+big$REGION = as.factor(big$REGION)
+big$RACE = as.factor(big$RACE)
+big$HOSPBEDR = as.factor(big$HOSPBEDR)
+big$HOSPOWN = as.factor(big$HOSPOWN)
+
+```
+
+# construct PE
+```{r}
+trt$PE = 1*(trt$PE_MILD>0 | trt$PE_SEVERE>0)
+trt = trt %>% select(-PE_MILD, -PE_SEVERE)
+summary(trt)
+
+big$PE = 1*(big$PE_MILD>0 | big$PE_SEVERE>0)
+big = big %>% select(-PE_MILD, -PE_SEVERE)
+summary(big)
+```
+
+
+```{r}
+trt_vml = trt
+trt_vml$REGION = as.numeric(trt_vml$REGION) - 1
+trt_vml$RACE = as.numeric(trt_vml$RACE) - 1
+trt_vml$HOSPOWN = as.numeric(trt_vml$HOSPOWN) - 1
+trt_vml$HOSPBEDR = as.numeric(trt_vml$HOSPBEDR)
+
+
+big_vml = big
+big_vml$REGION = as.numeric(big_vml$REGION) - 1
+big_vml$RACE = as.numeric(big_vml$RACE) - 1
+big_vml$HOSPOWN = as.numeric(big_vml$HOSPOWN) - 1
+big_vml$HOSPBEDR = as.numeric(big_vml$HOSPBEDR)
+
+```
+
+
+filter Year in RWD
+
+```{r}
+big_vml2 = big_vml[big_vml$YEAR>=26, ]
+big_vml2$YEAR = big_vml2$YEAR-25
+
+trt_vml2 = trt_vml
+trt_vml2$YEAR = trt_vml2$YEAR-25
+```
+
+
+```{r}
+
+saveRDS(trt_vml2, file='data for vml/filter year/trt.rds')
+saveRDS(big_vml2, file='data for vml/filter year/big.rds')
+
+```
+
+
+
