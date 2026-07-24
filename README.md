@@ -129,14 +129,16 @@ datasets are included in this repository.
 
 ### MIMIC-IV access and redistribution
 
-MIMIC-IV and MIMIC-IV-ED are credentialed PhysioNet resources. Users must
-independently obtain access, complete the required training, and accept the
-applicable data use agreement. See the official
-[MIMIC-IV](https://physionet.org/content/mimiciv/) and
-[MIMIC-IV-ED](https://physionet.org/content/mimic-iv-ed/2.2/) pages.
+MIMIC-IV and MIMIC-IV-Ext-MDS-ED are credentialed PhysioNet resources. Users
+must independently obtain access, complete the required training, and accept
+the applicable data use agreement. `admissions.csv` comes from
+[MIMIC-IV](https://physionet.org/content/mimiciv/), while `mds_ed.csv` comes
+from
+[MIMIC-IV-Ext-MDS-ED version 1.0.0](https://physionet.org/content/multimodal-emergency-benchmark/1.0.0/)
+(DOI: [10.13026/p90d-vd84](https://doi.org/10.13026/p90d-vd84)).
 
 > **Do not publish the MIMIC data files in a public GitHub repository.**
-> `admissions.csv`, `mds_ed.rds`, `trt.rds`, and `big.rds` contain restricted
+> `admissions.csv`, `mds_ed.csv`, `trt.rds`, and `big.rds` contain restricted
 > or derived patient-level data and remain subject to the
 > [PhysioNet Credentialed Health Data License](data/mimic-iv/LICENSE.txt).
 > The license does not permit sharing access with other users. Keep these files
@@ -145,16 +147,21 @@ applicable data use agreement. See the official
 The repository's MIT License applies to the software only. It does not replace
 or modify the terms governing MIMIC-IV or any derived data.
 
-When reporting results, cite the exact MIMIC-IV and MIMIC-IV-ED versions used.
-The PhysioNet project pages provide the corresponding citations and versioned
-DOIs.
+When reporting results, cite the exact MIMIC-IV version used and the
+MIMIC-IV-Ext-MDS-ED version 1.0.0 dataset:
+
+> Lopez Alcaraz, J. M., & Strodthoff, N. (2024).
+> *MIMIC-IV-Ext-MDS-ED: Multimodal Decision Support in the Emergency
+> Department—a Benchmark Dataset for Diagnoses and Deterioration Prediction in
+> Emergency Medicine* (Version 1.0.0). PhysioNet.
+> https://doi.org/10.13026/p90d-vd84
 
 ### MIMIC-IV preprocessing
 
 Run `data/mimic-iv/datapreprocess.Rmd` from its own directory after placing the
 authorized source files there. The workflow:
 
-1. reads `mds_ed.rds` and `admissions.csv`;
+1. reads `mds_ed.csv` and `admissions.csv`;
 2. retains one complete record per subject after joining ED-derived features
    with admission characteristics;
 3. defines the treatment cohort as a random sample of 1,000 Medicaid records;
