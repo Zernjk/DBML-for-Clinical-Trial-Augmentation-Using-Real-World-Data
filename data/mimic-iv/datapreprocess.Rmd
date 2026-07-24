@@ -1,0 +1,75 @@
+---
+title: "datapreprocess"
+output: html_document
+---
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(patchwork)
+library(forcats)
+```
+
+```{r}
+mds_ed <- readRDS("mds_ed.csv")
+admissions <- read_csv("admissions.csv")
+```
+
+```{r}
+df1 = mds_ed %>% select(general_subject_id, demographics_gender, demographics_age, 
+                        demographics_ethnicity_white,demographics_ethnicity_asian,`demographics_ethnicity_black/african`,`demographics_ethnicity_hispanic/latino`,
+                        vitals_heartrate_median,
+                        diagnoses_i10, diagnoses_e78, diagnoses_e11, diagnoses_i25, diagnoses_k21, diagnoses_n18,
+                        deterioration_icu_24h) %>%
+  mutate(deterioration_icu_24h = if_else(deterioration_icu_24h == -999, 0., deterioration_icu_24h))%>% 
+  drop_na()%>%
+  distinct(general_subject_id, .keep_all = TRUE)
+```
+
+```{r}
+df2 <- admissions %>% 
+  select(subject_id, insurance, language, marital_status) %>%
+  mutate(insurance = coalesce(insurance, "Other"))%>% 
+  mutate(language = coalesce(language, "(Other)"))%>%
+  mutate(language = fct_other(language, 
+                              keep = c("English", "Spanish", "Russian", "Chinese"), 
+                              other_level = "Other")) %>% 
+  drop_na() %>%
+  distinct(subject_id, .keep_all = TRUE)
+```
+
+
+```{r}
+df_merged <- df1 %>%
+  inner_join(df2, join_by(general_subject_id == subject_id)) %>%
+  mutate(across(c(insurance, language, marital_status), as.factor))
+```
+
+
+```{r}
+df11 = df_merged %>% filter(insurance=="Medicaid")
+df22 = df_merged %>% filter(insurance!="Medicaid")
+
+df_trt = df11 %>% slice_sample(n = 1000) %>% select(-general_subject_id, -insurance)
+df_big = df22%>% select(-general_subject_id, -insurance)
+```
+
+
+```{r}
+trt = df_trt %>% select(-deterioration_icu_24h) %>%
+  mutate(language = as.numeric(factor(language)) - 1)%>%
+  mutate(marital_status = as.numeric(factor(marital_status)) - 1)
+
+big = df_big %>% select(-deterioration_icu_24h) %>%
+  mutate(language = as.numeric(factor(language)) - 1)%>%
+  mutate(marital_status = as.numeric(factor(marital_status)) - 1)
+```
+
+
+```{r}
+saveRDS(trt, 'trt.rds')
+saveRDS(big, 'big.rds')
+```
+
