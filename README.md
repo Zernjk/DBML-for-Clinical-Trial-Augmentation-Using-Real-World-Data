@@ -197,11 +197,12 @@ Risk cohort described by Ananth et al. The underlying PACER patient-level data
 are not publicly available because of data-privacy restrictions and are not
 included in this repository.
 
-The synthetic clinical-trial and real-world-data inputs used by this workflow
-follow the external-control-arm application described by Cabrera et al. and
-were generated outside this repository using the
-[DNAMR R package](https://github.com/xaviercabrera/DNAMR). DNAMR is distributed
-separately under the GPL-3.0 License; no DNAMR source code is vendored here.
+The PACER-based synthetic clinical-trial and real-world-data inputs used by
+this workflow come from Cabrera et al. (2026), *Advancing Evidence Generation
+in Biomedical Research Using Natural Hermite and Propensity Score Indices:
+Applications to External Control Arms*. That study generated the synthetic
+datasets using the
+[DNAMR R package](https://github.com/xaviercabrera/DNAMR). DNAMR is distributed separately under the GPL-3.0 License.
 
 Related publications and software:
 
@@ -219,8 +220,8 @@ Related publications and software:
 - Cabrera, J. [DNAMR](https://github.com/xaviercabrera/DNAMR), R package
   repository.
 
-Run `data/pacer/data preprocess.Rmd` from its own directory after generating or
-otherwise obtaining the authorized synthetic inputs:
+Run `data/pacer/data preprocess.Rmd` from its own directory after obtaining the
+synthetic inputs associated with Cabrera et al. (2026):
 
 - `CTfinal.RDS`: synthetic clinical-trial cohort;
 - `RWDfinal.RDS`: synthetic real-world candidate pool.
