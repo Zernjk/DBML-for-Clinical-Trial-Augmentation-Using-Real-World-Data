@@ -1,4 +1,4 @@
-# DBEC
+# DBML
 
 Research implementation for constructing an external control arm from a large
 candidate pool using variational autoencoders (VAEs), reconstruction-based
