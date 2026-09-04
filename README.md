@@ -21,8 +21,7 @@ The implemented workflow:
 3. fits a second-stage VAE to the concatenated latent representations;
 4. screens the candidate control pool using reconstruction losses;
 5. estimates balancing weights for the retained candidates using kernel
-   maximum mean discrepancy (KMMD), Euclidean energy balancing, or a
-   mini-batch neural-network KMMD variant; and
+   maximum mean discrepancy (KMMD), or Euclidean energy balancing;
 6. optionally samples a final external control arm and evaluates covariate
    similarity in R.
 
