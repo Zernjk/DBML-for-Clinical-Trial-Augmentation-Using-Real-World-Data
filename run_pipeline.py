@@ -12,7 +12,7 @@ def run_full_simulation_from_data(
     configs={},  # dictionary with training params per modality
     output_root='./output',
     train_vae=True,
-    adjust = True,
+    adjust = False,
     save_vae_model=True,
     save_vae_results=True,
     save_vae_detail=True,
