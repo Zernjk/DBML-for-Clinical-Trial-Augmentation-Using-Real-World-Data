@@ -22,7 +22,7 @@ class VAE(torch.nn.Module):
 	def __init__(self, batch_size, input_dim, latent_dim, hidden_dim=50, loss_type='binary', 
 			     ordinal_K=None, embedding_dim=5, 
 				 z_prior='standard', sigma_prior_scale=1., sigma_prior_df=3, sigmas_init=None,
-				 beta_vae=1, **kwargs):
+				 beta_vae=1, genuine_binary_indices=None, categorical_groups=None, **kwargs):
 		super(VAE, self).__init__()
 
 		self.batch_size = batch_size
@@ -35,6 +35,8 @@ class VAE(torch.nn.Module):
 		self.ordinal_K = ordinal_K
 		self.embedding_dim = embedding_dim
 		self.beta_vae=beta_vae
+		self.genuine_binary_indices = []
+		self.categorical_groups = []
 
 		self.z_prior = z_prior
 
@@ -80,6 +82,142 @@ class VAE(torch.nn.Module):
 									nn.Linear(hidden_dim, hidden_dim),
 									nn.ReLU())
 
+		if self.loss_type == 'binary':
+			self._configure_binary_features(genuine_binary_indices, categorical_groups)
+
+
+	def _configure_binary_features(self, genuine_binary_indices, categorical_groups):
+		"""Validate the processed-column specification for the mixed discrete VAE."""
+		normalized_groups = []
+		categorical_index_set = set()
+
+		for group in categorical_groups or []:
+			indices = [int(i) for i in group['processed_indices']]
+			num_levels = int(group['num_levels'])
+
+			if num_levels < 2:
+				raise ValueError("Each categorical variable must have at least two levels.")
+			if len(indices) != num_levels - 1:
+				raise ValueError(
+					"A K-level categorical variable must have exactly K-1 processed columns."
+				)
+			if len(indices) != len(set(indices)):
+				raise ValueError("Categorical processed indices must be unique within a group.")
+			if any(i < 0 or i >= self.input_dim for i in indices):
+				raise ValueError("Categorical processed index is outside the VAE input dimension.")
+			if categorical_index_set.intersection(indices):
+				raise ValueError("Categorical processed-column groups must not overlap.")
+
+			categorical_index_set.update(indices)
+			normalized_group = dict(group)
+			normalized_group['processed_indices'] = indices
+			normalized_group['num_levels'] = num_levels
+			normalized_groups.append(normalized_group)
+
+		if genuine_binary_indices is None:
+			genuine_binary_indices = [
+				i for i in range(self.input_dim) if i not in categorical_index_set
+			]
+		else:
+			genuine_binary_indices = [int(i) for i in genuine_binary_indices]
+
+		if len(genuine_binary_indices) != len(set(genuine_binary_indices)):
+			raise ValueError("Genuine binary processed indices must be unique.")
+		if any(i < 0 or i >= self.input_dim for i in genuine_binary_indices):
+			raise ValueError("Genuine binary processed index is outside the VAE input dimension.")
+		if categorical_index_set.intersection(genuine_binary_indices):
+			raise ValueError("Genuine binary and categorical processed indices must not overlap.")
+
+		covered_indices = categorical_index_set.union(genuine_binary_indices)
+		if covered_indices != set(range(self.input_dim)):
+			raise ValueError(
+				"Every binary-modality input column must be specified as either genuine "
+				"binary or part of one categorical group."
+			)
+
+		self.genuine_binary_indices = genuine_binary_indices
+		self.categorical_groups = normalized_groups
+
+
+	def _categorical_target(self, x, group):
+		"""Convert a K-1 dummy block to class labels in {0, ..., K-1}."""
+		group_x = x[:, group['processed_indices']]
+		target = torch.argmax(group_x, dim=1).long() + 1
+		is_reference = torch.sum(group_x, dim=1) < 0.5
+		return torch.where(is_reference, torch.zeros_like(target), target)
+
+
+	def _categorical_logits(self, x_pred, group):
+		"""Prepend the fixed reference-category logit to K-1 learned logits."""
+		free_logits = x_pred[:, group['processed_indices']]
+		reference_logits = torch.zeros(
+			(free_logits.shape[0], 1), dtype=free_logits.dtype, device=free_logits.device
+		)
+		return torch.cat([reference_logits, free_logits], dim=1)
+
+
+	def binary_reconstruction_loss_per_sample(self, x_pred, x):
+		"""Bernoulli NLL for genuine binaries plus categorical NLL per K-1 block."""
+		reconstruction_loss = torch.zeros(
+			x.shape[0], dtype=x_pred.dtype, device=x_pred.device
+		)
+
+		if self.genuine_binary_indices:
+			binary_logits = x_pred[:, self.genuine_binary_indices]
+			binary_targets = x[:, self.genuine_binary_indices]
+			binary_loss = F.binary_cross_entropy_with_logits(
+				binary_logits, binary_targets, reduction='none'
+			).sum(dim=1)
+			reconstruction_loss = reconstruction_loss + binary_loss
+
+		for group in self.categorical_groups:
+			full_logits = self._categorical_logits(x_pred, group)
+			target = self._categorical_target(x, group)
+			reconstruction_loss = reconstruction_loss + F.cross_entropy(
+				full_logits, target, reduction='none'
+			)
+
+		return reconstruction_loss
+
+
+	def binary_reconstruction_probabilities(self, x_pred):
+		"""Return probabilities in the unchanged K-1 processed-data layout."""
+		probabilities = torch.zeros_like(x_pred)
+
+		if self.genuine_binary_indices:
+			probabilities[:, self.genuine_binary_indices] = torch.sigmoid(
+				x_pred[:, self.genuine_binary_indices]
+			)
+
+		for group in self.categorical_groups:
+			full_probabilities = torch.softmax(
+				self._categorical_logits(x_pred, group), dim=1
+			)
+			# The processed representation omits reference category 0.
+			probabilities[:, group['processed_indices']] = full_probabilities[:, 1:]
+
+		return probabilities
+
+
+	def binary_reconstruction_predictions(self, x_pred):
+		"""Return hard predictions in the unchanged K-1 processed-data layout."""
+		predictions = torch.zeros_like(x_pred)
+
+		if self.genuine_binary_indices:
+			binary_probabilities = torch.sigmoid(x_pred[:, self.genuine_binary_indices])
+			predictions[:, self.genuine_binary_indices] = (binary_probabilities >= 0.5).to(
+				x_pred.dtype
+			)
+
+		for group in self.categorical_groups:
+			predicted_class = torch.argmax(self._categorical_logits(x_pred, group), dim=1)
+			one_hot = F.one_hot(
+				predicted_class, num_classes=group['num_levels']
+			).to(x_pred.dtype)
+			predictions[:, group['processed_indices']] = one_hot[:, 1:]
+
+		return predictions
+
 
 	def encode(self, x):
 		if self.loss_type == 'ordinal':
@@ -110,10 +248,6 @@ class VAE(torch.nn.Module):
 
 	def decode(self, z):
 		x_reconstructed = self.generator(z)
-
-		if self.loss_type=='binary':
-			x_reconstructed = torch.sigmoid(x_reconstructed)
-
 		return x_reconstructed
 
 	def kld_z(self, z, mu, log_var):
@@ -177,8 +311,9 @@ class VAE(torch.nn.Module):
 			reconstruction_loss = 0.5 * loss(x_pred / sigmas, (x / sigmas))
 
 		if self.loss_type == 'binary':
-			log_prob = x * torch.log(x_pred + 1e-6) + (1-x) * torch.log(1-x_pred + 1e-6)
-			reconstruction_loss = -log_prob.sum(1).mean()
+			reconstruction_loss = self.binary_reconstruction_loss_per_sample(
+				x_pred, x
+			).mean()
 		
 		if self.loss_type == 'ordinal':
 			reconstruction_loss = 0
@@ -198,8 +333,7 @@ class VAE(torch.nn.Module):
 			reconstruction_loss  = 0.5*torch.mean((x_pred / sigmas - x / sigmas) ** 2, dim=1)
 		
 		if self.loss_type == 'binary':
-			log_prob = x * torch.log(x_pred + 1e-6) + (1-x) * torch.log(1-x_pred + 1e-6)
-			reconstruction_loss = -log_prob.sum(1)
+			reconstruction_loss = self.binary_reconstruction_loss_per_sample(x_pred, x)
 		
 		if self.loss_type == 'ordinal':
 			reconstruction_loss = torch.zeros_like(x)

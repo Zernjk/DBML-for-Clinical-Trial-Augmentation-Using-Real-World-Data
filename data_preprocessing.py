@@ -17,7 +17,8 @@ def preprocess_data(data, binary_indices=[], ordinal_indices=[], continuous_indi
 
     Returns:
     - dict with keys ['binary', 'ordinal', 'continuous']
-    - metadata dictionary for reference
+    - metadata dictionary for reference, including the processed-column indices
+      of genuine binary variables and each categorical dummy block
     """
     if isinstance(data, np.ndarray):
         data = pd.DataFrame(data)
@@ -25,7 +26,13 @@ def preprocess_data(data, binary_indices=[], ordinal_indices=[], continuous_indi
     n = len(data)
 
     processed = {'binary': [], 'ordinal': [], 'cont': []}
-    metadata = {'categorical_mappings': {}, 'column_names': list(data.columns)}
+    metadata = {
+        'categorical_mappings': {},
+        'column_names': list(data.columns),
+        # These are indices in processed['binary'], not indices in the source data.
+        'genuine_binary_indices': list(range(len(binary_indices))),
+        'categorical_groups': []
+    }
 
     for col in binary_indices:
         processed['binary'].append(data.iloc[:, col])
@@ -54,9 +61,17 @@ def preprocess_data(data, binary_indices=[], ordinal_indices=[], continuous_indi
                 one_hot[expected] = 0
         one_hot = one_hot[expected_cols]  # ensure column order
 
+        group_start = len(processed['binary'])
         for subcol in one_hot.columns:
             processed['binary'].append(one_hot[subcol])
         metadata['categorical_mappings'][col] = one_hot.columns.tolist()
+        metadata['categorical_groups'].append({
+            'source_index': col,
+            'num_levels': levels,
+            'processed_indices': list(range(group_start, group_start + levels - 1)),
+            'dummy_columns': one_hot.columns.tolist(),
+            'reference_level': 0
+        })
 
     for key in processed:
         if processed[key]:

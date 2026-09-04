@@ -75,6 +75,12 @@ def run_full_simulation_from_data(
             scheduler=vae_config.get('scheduler','linear'),
             ordinal_K=vae_config.get('ordinal_K', 4),
             embedding_dim=vae_config.get('embedding_dim', 4),
+            genuine_binary_indices=(
+                metadata['genuine_binary_indices'] if name == 'binary' else None
+            ),
+            categorical_groups=(
+                metadata['categorical_groups'] if name == 'binary' else None
+            ),
             big_data=processed_big[name],
             train=train_vae,
             save_model=save_vae_model,

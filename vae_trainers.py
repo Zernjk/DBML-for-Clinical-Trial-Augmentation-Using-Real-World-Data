@@ -74,13 +74,49 @@ def plot_recon(x, x_recon, out_dir):
 def evaluate_vae_detail(model, x, x_recon, loss_type, out_dir):
     os.makedirs(out_dir, exist_ok=True)
     model.eval()
-    plot_recon(x, x_recon, out_dir)
 
     if loss_type == 'binary':
-        binary_x_recon = (x_recon.detach().cpu().numpy() >= 0.5).astype(int)
-        accuracy = np.mean(x.cpu().numpy() == binary_x_recon, axis=0)
+        x_recon_for_plot = model.binary_reconstruction_probabilities(x_recon)
+    else:
+        x_recon_for_plot = x_recon
+    plot_recon(x, x_recon_for_plot, out_dir)
+
+    if loss_type == 'binary':
+        predictions = model.binary_reconstruction_predictions(x_recon)
+
+        if model.genuine_binary_indices:
+            genuine_binary_accuracy = np.mean(
+                x[:, model.genuine_binary_indices].detach().cpu().numpy()
+                == predictions[:, model.genuine_binary_indices].detach().cpu().numpy(),
+                axis=0
+            )
+        else:
+            genuine_binary_accuracy = np.empty(0)
+
+        categorical_accuracy = []
+        for group in model.categorical_groups:
+            true_class = model._categorical_target(x, group)
+            predicted_class = torch.argmax(model._categorical_logits(x_recon, group), dim=1)
+            categorical_accuracy.append(
+                torch.mean((true_class == predicted_class).float()).detach().cpu().item()
+            )
+        categorical_accuracy = np.asarray(categorical_accuracy)
+
+        # One entry per original variable: genuine binaries first, then categoricals.
+        accuracy = np.concatenate([genuine_binary_accuracy, categorical_accuracy])
         np.savetxt(os.path.join(out_dir, 'accuracy.csv'), accuracy, delimiter=',')
-        print(accuracy)
+        np.savetxt(
+            os.path.join(out_dir, 'genuine_binary_accuracy.csv'),
+            genuine_binary_accuracy,
+            delimiter=','
+        )
+        np.savetxt(
+            os.path.join(out_dir, 'categorical_accuracy.csv'),
+            categorical_accuracy,
+            delimiter=','
+        )
+        print('genuine binary accuracy:', genuine_binary_accuracy)
+        print('categorical accuracy:', categorical_accuracy)
 
     elif loss_type == 'ordinal':
         # save rhos and thetas
@@ -126,7 +162,9 @@ def train_vae_on_modality(x,
                           save_model=True, 
                           save_results=True,
                           save_detail = True,
-                          big_data=None):
+                          big_data=None,
+                          genuine_binary_indices=None,
+                          categorical_groups=None):
     
     x_tensor = torch.tensor(x, dtype=torch.long if loss_type == 'ordinal' else torch.float32)
     input_dim = x.shape[1]
@@ -139,7 +177,9 @@ def train_vae_on_modality(x,
         hidden_dim=hidden_dim, loss_type=loss_type,
         ordinal_K=ordinal_K if loss_type == 'ordinal' else None,
         embedding_dim=embedding_dim if loss_type == 'ordinal' else None,
-        sigma_prior_scale=sigma_prior_scale, sigmas_init=sigmas_init
+        sigma_prior_scale=sigma_prior_scale, sigmas_init=sigmas_init,
+        genuine_binary_indices=genuine_binary_indices if loss_type == 'binary' else None,
+        categorical_groups=categorical_groups if loss_type == 'binary' else None
     ).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -166,9 +206,27 @@ def train_vae_on_modality(x,
 
         os.makedirs(output_dir, exist_ok=True)
         if save_model:
-            torch.save({'state_dict': model.state_dict()}, os.path.join(output_dir, 'model.pth'))
+            torch.save({
+                'state_dict': model.state_dict(),
+                'genuine_binary_indices': model.genuine_binary_indices,
+                'categorical_groups': model.categorical_groups
+            }, os.path.join(output_dir, 'model.pth'))
     else:
-        model.load_state_dict(torch.load(os.path.join(output_dir, 'model.pth'))['state_dict'])
+        checkpoint = torch.load(os.path.join(output_dir, 'model.pth'), map_location=device)
+        if loss_type == 'binary':
+            saved_groups = checkpoint.get('categorical_groups')
+            if saved_groups is None and model.categorical_groups:
+                raise ValueError(
+                    "The saved binary VAE predates categorical-group likelihoods. "
+                    "Retrain the model with train_vae=True."
+                )
+            if saved_groups is not None and saved_groups != model.categorical_groups:
+                raise ValueError("Saved and current categorical feature specifications differ.")
+            saved_binary_indices = checkpoint.get('genuine_binary_indices')
+            if (saved_binary_indices is not None
+                    and saved_binary_indices != model.genuine_binary_indices):
+                raise ValueError("Saved and current genuine-binary feature indices differ.")
+        model.load_state_dict(checkpoint['state_dict'])
 
     model.eval()
     x_tensor = x_tensor.to(device)
@@ -180,8 +238,9 @@ def train_vae_on_modality(x,
     loss_train = model.reconstruction_loss_outlier(x_recon, x_tensor, log_sigmas, thetas).detach().cpu().numpy()
 
     if save_results:
-        np.savetxt(os.path.join(output_dir, 'z_mean.csv'), z_mean.detach().cpu().numpy(), delimiter=',')
-        np.savetxt(os.path.join(output_dir, 'z_log_var.csv'), z_log_var.detach().cpu().numpy(), delimiter=',')
+        # The downstream pipeline uses these arrays directly from memory.
+        # np.savetxt(os.path.join(output_dir, 'z_mean.csv'), z_mean.detach().cpu().numpy(), delimiter=',')
+        # np.savetxt(os.path.join(output_dir, 'z_log_var.csv'), z_log_var.detach().cpu().numpy(), delimiter=',')
         np.savetxt(os.path.join(output_dir, 'loss_train.csv'), loss_train, delimiter=',')
 
     results = {
@@ -222,8 +281,9 @@ def train_vae_on_modality(x,
 
 
         if save_results:
-            np.savetxt(os.path.join(output_dir, 'z_mean_big.csv'), z_mean_big.detach().cpu().numpy(), delimiter=',')
-            np.savetxt(os.path.join(output_dir, 'z_log_var_big.csv'), z_log_var_big.detach().cpu().numpy(), delimiter=',')
+            # The downstream pipeline uses these arrays directly from memory.
+            # np.savetxt(os.path.join(output_dir, 'z_mean_big.csv'), z_mean_big.detach().cpu().numpy(), delimiter=',')
+            # np.savetxt(os.path.join(output_dir, 'z_log_var_big.csv'), z_log_var_big.detach().cpu().numpy(), delimiter=',')
             np.savetxt(os.path.join(output_dir, 'loss_big.csv'), loss_big, delimiter=',')
 
     return results

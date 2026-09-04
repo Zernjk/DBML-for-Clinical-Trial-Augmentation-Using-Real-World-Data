@@ -81,10 +81,8 @@ def get_euclidean_loss(
     w_raw = torch.nn.functional.softplus(logits) if adjust else torch.sigmoid(logits)
     w_norm = w_raw / (torch.sum(w_raw) + 1e-10)
 
-    r1 = torch.sum(w_norm.view(-1, 1) * Dxy) / M
-
-    outer_w = torch.outer(w_norm, w_norm)
-    r2 = torch.sum(outer_w * Dxx)
+    r1 = (w_norm @ Dxy).sum() / M
+    r2 = torch.dot(w_norm, Dxx @ w_norm)
 
     obj = 2 * r1 - r2
 
@@ -139,6 +137,13 @@ def run_mmd(x_trt,
     M, N = x_trt.shape[0], x_pc.shape[0]
     kernel_name = "RBF Kernel (KMMD)" if kernel == 'rbf' else "Euclidean Kernel (Energy Balancing)"
     adjustment_name = " with penalty-to-one adjustment" if adjust else ""
+
+    method_file_tag = 'kmmd_rbf' if kernel == 'rbf' else 'energy_eucl'
+    if adjust:
+        variant_file_tag = 'pento1_ssl' if ssl_penalty else 'pento1'
+    else:
+        variant_file_tag = 'ssl' if ssl_penalty else 'base'
+    output_file_stem = f'{method_file_tag}_{variant_file_tag}'
     
     if ssl_penalty:
         print(
@@ -246,19 +251,9 @@ def run_mmd(x_trt,
             w_opt = w_opt_raw / (np.mean(w_opt_raw) + 1e-10)
 
         if save_results:
-            if kernel == 'rbf' and adjust:
-                param_file = 'rbf_params_ssl.pt' if ssl_penalty else 'rbf_params_pento1.pt'
-                w_file = 'w_rbf_ssl.csv' if ssl_penalty else 'w_rbf_pento1.csv'
-            elif kernel == 'rbf':
-                param_file = 'kmmd_params_ssl.pt' if ssl_penalty else 'kmmd_params.pt'
-                w_file = 'w_opt_ssl.csv' if ssl_penalty else 'w_opt.csv'
-            elif adjust:
-                param_file = 'energybal_params_pento1.pt'
-                w_file = 'w_engy_pento1.csv'
-            else:
-                param_file = 'energybal_params.pt'
-                w_file = 'w_engy.csv'
-                
+            param_file = f'{output_file_stem}_params.pt'
+            w_file = f'{output_file_stem}_weights.csv'
+                 
             torch.save(params.detach().cpu(), os.path.join(output_dir, param_file))
             np.savetxt(os.path.join(output_dir, w_file), w_opt, delimiter=',', fmt='%f')
 
@@ -268,22 +263,12 @@ def run_mmd(x_trt,
             plt.ylabel("Loss")
             plt.title(f"{kernel_name} Loss over Iterations")
             plt.grid(True)
-            if kernel == 'rbf':
-                loss_img = 'rbf_kernel_loss_pento1.png' if adjust else 'kmmd_loss.png'
-            else:
-                loss_img = 'energybal_loss_pento1.png' if adjust else 'energybal_loss.png'
+            loss_img = f'{output_file_stem}_loss.png'
             plt.savefig(os.path.join(output_dir, loss_img), dpi=300)
             plt.close() 
 
     else:
-        if kernel == 'rbf' and adjust:
-            w_file = 'w_rbf_ssl.csv' if ssl_penalty else 'w_rbf_pento1.csv'
-        elif kernel == 'rbf':
-            w_file = 'w_opt_ssl.csv' if ssl_penalty else 'w_opt.csv'
-        elif adjust:
-            w_file = 'w_engy_pento1.csv'
-        else:
-            w_file = 'w_engy.csv'
+        w_file = f'{output_file_stem}_weights.csv'
         w_opt = np.loadtxt(os.path.join(output_dir, w_file), delimiter=',')
 
     if return_result:
